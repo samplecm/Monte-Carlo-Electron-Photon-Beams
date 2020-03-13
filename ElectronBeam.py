@@ -21,7 +21,7 @@ def main():
 	stepSize = 0.03 #step size in cm
 	xyVox = 0.5 #x,y direction voxel size in cm
 	zVox = 0.2 #z (beam direction) voxel size in cm
-	N = 1000000 #number of primary particle starting points
+	N = 1000 #number of primary particle starting points
 	M = 1 #number of particles to start at each starting point. Total = M*N
 	phantomDim = 30 #define the phantom cm dimensions (square)
 	phantom = Phantom(phantomDim,xyVox,zVox)
@@ -37,11 +37,11 @@ def main():
 	xStart = -fieldSize/2
 	
 	for i in range(xSpread): #start the particle propagation
-		xStart += fieldSize*(i/(xSpread-1))
+		xStart += fieldSize*(1/(xSpread-1))
 		yStart = -fieldSize/2
 		for j in range(ySpread):		
 			 #need to change the starting positions of every new electron.
-			yStart += fieldSize*(j/(ySpread-1))
+			yStart += fieldSize*(1/(ySpread-1))
 			 #all electrons start at z = 0 hitting the water
 			global e
 			e = Electron(np.array([xStart,yStart,0]),[0,0,1],particleEnergy,stepSize) 
