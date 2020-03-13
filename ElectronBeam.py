@@ -11,15 +11,17 @@ import math
 import matplotlib.pyplot as plt
 import random
 import csv
+import scipy.interpolate
 
 
 def main():
 	global phantom
+	global SP
 	particleEnergy = 10 #starting electron energy in Mev
-	stepSize = 0.05 #step size in cm
+	stepSize = 0.03 #step size in cm
 	xyVox = 0.5 #x,y direction voxel size in cm
 	zVox = 0.2 #z (beam direction) voxel size in cm
-	N = 1500000 #number of primary particle starting points
+	N = 1000000 #number of primary particle starting points
 	M = 1 #number of particles to start at each starting point. Total = M*N
 	phantomDim = 30 #define the phantom cm dimensions (square)
 	phantom = Phantom(phantomDim,xyVox,zVox)
@@ -28,26 +30,35 @@ def main():
 					#stopping powers in a 2d array. (first column = energy)
 	
 
-	lap = 0
-	while (lap <= M):
-		for i in range(math.floor(N**(1/2))): #start the particle propagation
-			for j in range(math.floor(N**(1/2))):
-				xStart = -fieldSize/2+fieldSize*(i/(math.floor(N**(1/2))-1))
-				 #need to change the starting positions of every new electron.
-				yStart = -fieldSize/2+fieldSize*(j/(math.floor(N**(1/2))-1))
-				pos = np.array([xStart,yStart,0])  #all electrons start at z = 0 hitting the water
-				global e
-				e = Electron(pos,[0,0,1],particleEnergy,stepSize,SP) 
-				e.transport()
-				
-		lap +=1
-	phantom.doses = phantom.doses/np.max(phantom.doses)	
+	
+	count = 0 #increment to know how many have been simulated
+	xSpread = math.floor(N**(1/2))
+	ySpread = math.floor(N**(1/2))
+	xStart = -fieldSize/2
+	
+	for i in range(xSpread): #start the particle propagation
+		xStart += fieldSize*(i/(xSpread-1))
+		yStart = -fieldSize/2
+		for j in range(ySpread):		
+			 #need to change the starting positions of every new electron.
+			yStart += fieldSize*(j/(ySpread-1))
+			 #all electrons start at z = 0 hitting the water
+			global e
+			e = Electron(np.array([xStart,yStart,0]),[0,0,1],particleEnergy,stepSize) 
+			e.transport()
+			count +=1
+			if count % 10000 == 0:
+				print(int(100*count/N))
+		
+	
+	phantom.doses = phantom.doses
 	plotCAXDose()	
+	#np.save(doses.npy, phantom.doses)
 			
 		
 
-def CSV2Array(fileName): #This function opens the CSV with stopping powers and loads energies and SPs into a 2 column array
-	f = open(fileName,'r')
+def CSV2Array(fileName): #This function opens the CSV with stopping powers and loads energies and SPs into a 2 column array, 
+	f = open(fileName,'r')#... and sets up an interpolate function.
 	reader = csv.reader(f)
 	SP = np.zeros((66,2))
 	energies = []
@@ -63,6 +74,9 @@ def CSV2Array(fileName): #This function opens the CSV with stopping powers and l
 	#csv file is glitching, so manually enter the first row...
 	SP[0,0]=0.01
 	SP[0,1] = 22.6
+	
+	SP = scipy.interpolate.interp1d(SP[:,0],SP[:,1])
+	
 	return SP
 
 	
@@ -95,23 +109,23 @@ def thetaScatterAngle(E,stepSize): #depends on particle energy E
 def plotCAXDose():
 	z = phantom.zPhant
 	CAXIndice = math.floor(phantom.phantomDim/phantom.xyVox/2-1) #get indices of the central axis z,y with respect to phantom.
-	doses = phantom.doses[CAXIndice,CAXIndice,:]
+	doses = phantom.doses[CAXIndice,CAXIndice,:]/np.max(phantom.doses[CAXIndice,CAXIndice,:])
 	plt.plot(z,doses)
 	axes = plt.gca()
 	axes.set_xlim([0,6])
 	axes.set_ylim(bottom = 0)
 	plt.xlabel('Depth (cm)')
-	plt.ylabel('Dose, (Gy)')
+	plt.ylabel('Depth Dose')
 	
 	
 class Electron:
 	
-	def __init__(self,pos,direction, E,stepSize,SP):
+	def __init__(self,pos,direction, E,stepSize):
 		self.pos = pos
 		self.direction = direction
 		self.E = E
 		self.stepSize = stepSize #CH step size
-		self.SP = SP
+		
 		
 		#Now define directions in terms of spherical coordinates
 	
@@ -124,9 +138,9 @@ class Electron:
 				self.phi = 0
 			else:	
 				self.phi = math.atan(self.direction[1]/self.direction[0])
-			self.theta = math.asin(self.direction[0]/math.cos(self.phi))
-			i = closestIndex(self.SP[:,0],self.E)
-			deltaE = self.stepSize*self.SP[i,1] #find the energy lost in the step (CSDA)
+			self.theta = math.acos(self.direction[2])	
+			#i = closestIndex(self.SP[:,0],self.E)
+			deltaE = self.stepSize*SP(self.E) #find the energy lost in the step (CSDA)
 			if (deltaE < self.E):
 				self.E -= deltaE #decrease this energy from the total energy. 
 			else:
