@@ -6,25 +6,47 @@ Photon Beams
 """
 import numpy as np 
 import math
-import matplotlib.pyplot as plt
 import random
+import matplotlib.pyplot as plt
 import csv
 import scipy.interpolate
 import scipy.optimize
 import seaborn as sb
 from matplotlib import cm 
+from scipy.ndimage import convolve
 
-
+#Variables:
+######################################################################################
+E = 10#starting electron energy in Mev
+stepSize = 0.01 #step size in cm
 N = 100 #number of photon starting points
 comptonAngles = []#to hold all compton angles scattered, for plotting	
 comptonCount = 0	
-phantomDim = 20 #define the phantom cm dimensions (square)
+phantomDim = 15 #define the phantom cm dimensions (square)
+phantomDimZ = 150
+field_size = 10 #photon beam size
 xyVox = 0.05 #x,y direction voxel size in cm
 zVox = 0.05 #z (beam direction) voxel size in cm
 
-
+if E == 2:
+	tau = 1.063*10**-6
+	mu_c = 4.901*10**-2
+	kappa = 3.908*10**-4
+	mu = tau + mu_c + kappa 
+if E == 6:
+	tau = 2.483*10**-7
+	mu_c = 2.455*10**-2
+	kappa = 3.155*10**-3
+	mu = tau + mu_c + kappa 
+if E == 10:
+	tau = 1.386*10**-7
+	mu_c = 1.710*10**-2
+	kappa = 5.090*10**-3
+	mu = tau + mu_c + kappa 
+##############################################################################
 
 def main():
+	global kernelPhantom
 	global phantom
 	global SP
 	global tau 
@@ -36,18 +58,18 @@ def main():
 	global phantomDim
 	global xyVox
 	global zVox
-#increment every compton interaction, to keep track of angle indices
-#################Variable Defining#############################################	
-	E = 10#starting electron energy in Mev
-	stepSize = 0.01 #step size in cm
+	global E
+	global interaction 
 	count = 0
-
-	phantom = Phantom(phantomDim,xyVox,zVox)
 	SP = CSV2Array('stoppingPower.csv') #get list of energies and their corresponding 
-					#stopping powers in a 2d array. (first column = energy)
+									#stopping powers in a 2d array. (first column = energy)
+
+	phantom = PhotonBeamSim() #returns a 3D phantom containing the correct # of interactions per position as elements
+	kernelPhantom = Kernel(5,10,xyVox,zVox)
+
+
 		
-################################################################################
-	for i in range(N):
+	for i in range(N): #Get the kernel
 		global photon
 		pos = np.array([0,0,0])
 		photon = Photon(pos,[0,0,1],E,stepSize)
@@ -55,10 +77,15 @@ def main():
 		count +=1
 		if count/N*100 % 1 == 0:
 			print("Simulating: ",int(100*count/N),"%")
-	#doseMax = np.amax(phantom.doses)
-	#phantom.doses = phantom.doses/doseMax			
-#	ContourPlot()
-	HeatMap()
+	#Save the Kernel:
+	kernel_name = str(E) + "MeV_Kernel"
+	np.save(kernel_name,kernelPhantom)		
+	convolve(phantom.startingPoints,kernelPhantom.doses)		
+	ContourPlot()
+	#HeatMap()		
+
+
+#Histogram stuff for angles
 #	print(np.sum(phantom.doses))
 #	plt.hist(comptonAngles,bins=100,range=(0,math.pi))
 #	plt.show()
@@ -69,27 +96,25 @@ def main():
 #	plt.plot(a,b)	
 #	
 		
-	
-#	phi = np.linspace(0,2*math.pi,1000)
-#	cs = np.linspace(0,1000,1000)
-#	for i in range(1000):
-#		cs[i] = kleinNeshina(10,phi[i])
-#	plt.plot(phi,cs)	
-#	for i in range(N):	
-#		pos = np.array([0,0,0])  #all photons start at z = 0 in the middle
-#		global e
-#		e = Electron(pos,[0,0,1],particleEnergy,stepSize) 
-#		e.transport()
-#
-#	
-#	
-#	phantom.doses = phantom.doses
-#	plotCAXDose()	
-#			
-
-
 
 ####################################Compton Angle Functions ##################################################################################
+def PhotonBeamSim():
+	global xyVox
+	global phantomDim
+	global phantomDimZ
+	global E
+	global N
+	global field_size
+	interactions = VoxelInteractions(xyVox,field_size)#3D array where elements are integers indicating the 
+											#number of interactions at that position.
+	#Now need to combine this with a full phantom.
+	phantom = Phantom(phantomDim,phantomDimZ,xyVox,zVox)
+	off_beam_voxels = int((phantomDim-field_size)/2*xyVox) #number of voxels that will be skipped before adding in the 
+														 #interactions to the phantom array.
+	phantom.startingPoints[(off_beam_voxels+1):(200+off_beam_voxels+1),(off_beam_voxels+1):(200+off_beam_voxels+1),:] = interactions													 
+	#starting points contains the number of interactions in each voxel for the phantom!
+	return phantom
+
 def KleinNeshina(E,phi):
 		E_prime = E/(1+(E/0.511)*(1-math.cos(phi)))
 		E_elec = E-E_prime
@@ -249,11 +274,11 @@ def HeatMap():
 #	sb.heatmap((phantom.doses[CAXIndice,(CAXIndice-20):(CAXIndice+20),(CAXIndice-30):(CAXIndice+40)]))
 	global phantomDim
 	global xyVox
-	CAXIndex = math.floor(phantom.phantomDim/phantom.xyVox/2+1) #get indices of the central axis z,y with respect to phantom.
-
+	CAXIndex = math.floor(kernelPhantom.phantomDim/kernelPhantom.xyVox/2) #get indices of the central axis z,y with respect to phantom.
+	CAXIndexDepth = math.floor(kernelPhantom.phantomDimZ/kernelPhantom.xyVox/2)
 	
 	lat = np.arange((CAXIndex-10),(CAXIndex+10),1)
-	depth = np.arange(CAXIndex-10,CAXIndex+30,1)
+	depth = np.arange((CAXIndexDepth-10),(CAXIndexDepth+20),1)
 	l,d = np.meshgrid(lat,depth)
 	#l,d are in terms of index right now, so need to scale them to appropriate units.
 	lat2 = []
@@ -265,7 +290,7 @@ def HeatMap():
 	lat3=[ '%.2f' % elem for elem in lat2 ]
 	depth3=[ '%.2f' % elem for elem in depth2]
 
-	doses = phantom.doses[CAXIndex,l,d]#phantom.doses[CAXIndex,(CAXIndex-20):(CAXIndex+20),(CAXIndex-30):(CAXIndex+40)]
+	doses = kernelPhantom.doses[CAXIndex,l,d]#phantom.doses[CAXIndex,(CAXIndex-20):(CAXIndex+20),(CAXIndex-30):(CAXIndex+40)]
 
 	plot = sb.heatmap(doses)
 #	plot.set(xticklabels=lat3)
@@ -273,16 +298,14 @@ def HeatMap():
 
 	
 	
-	
-	
 def ContourPlot():
 	global phantomDim
 	global xyVox
-	CAXIndex = math.floor(phantom.phantomDim/phantom.xyVox/2+1) #get indices of the central axis z,y with respect to phantom.
-
+	CAXIndex = math.floor(kernelPhantom.kernelDim/kernelPhantom.xyVox/2) #get indices of the central axis z,y with respect to phantom.
+	CAXIndexDepth = math.floor(kernelPhantom.kernelDimZ/kernelPhantom.xyVox/4)
 	
 	lat = np.arange((CAXIndex-10),(CAXIndex+10),1)
-	depth = np.arange(CAXIndex-10,CAXIndex+30,1)
+	depth = np.arange((CAXIndexDepth-10),(CAXIndexDepth+20),1)
 	l,d = np.meshgrid(lat,depth)
 	#l,d are in terms of index right now, so need to scale them to appropriate units.
 	lat2 = []
@@ -295,34 +318,65 @@ def ContourPlot():
 
 	l2,d2 = np.meshgrid(lat2,depth2)
 
-	doses = phantom.doses[CAXIndex,l,d]#phantom.doses[CAXIndex,(CAXIndex-20):(CAXIndex+20),(CAXIndex-30):(CAXIndex+40)]
+	doses = kernelPhantom.doses[CAXIndex,l,d]#phantom.doses[CAXIndex,(CAXIndex-20):(CAXIndex+20),(CAXIndex-30):(CAXIndex+40)]
 
 
-	plt.contourf(l2,d2,doses,10)
+	plt.contourf(l,d,doses,15)
 	plt.colorbar()	
 	plt.title('Contour Plot')
 	plt.xlabel('Off-axis Distance (mm)')
 	plt.ylabel('Depth (mm)')
+	
+	
+def VoxelInteractions(xyVox,fieldSize):
+	global mu
+	global E
+	global mu_c
+	global tau
+	global kappa
+	global N
+	#first get number of interactions per depth column:
+	voxels_per_row = int(fieldSize/xyVox)
+	col_ints = N/(voxels_per_row)**2
+	#idea will be to sample 10000 photon interactions in one column, and then normalize this to col_ints, and assign
+	#the amount of interactions to each voxel.	
+	interactions = np.zeros((voxels_per_row,voxels_per_row,int(phantomDimZ/xyVox)))
+	sampleInts = np.zeros((int(phantomDim/xyVox)))
+		
+	#now assign each column in the interactions matrix these values, but scaled to the correct amount of photons.
+	#first scale it:
+	sampleInts = sampleInts*(col_ints)/(10000)
+	
+	for i in range(len(interactions[:,1,1])):
+		for j in range(len(interactions[:,1,1])):#Scanning across all vertical columns in the field
+				for d in range(int(col_ints)):
+					#recall that the distance into the phantom (0 at surface) is 0.05cm*Index.
+					R = random.random()
+					d = -math.log(R)/mu
+					#Now need to convert this into the appropriate depth index.
+					index = int(d/xyVox)
+					
+					try:
+						interactions[i,j,index]=interactions[i,j,index]+1
+					except:
+						pass
+	return interactions	
+		
+	
+	
 
 class Photon:
 	
 	def __init__(self,pos,direction,E,stepSize):
+		global mu
+		global mu_c
+		global tau
+		global kappa
 	#get the cross sections for whether energy is 2,6 or 10MV.
-		if E == 2:
-			self.tau = 1.063*10**-6
-			self.mu_c = 4.901*10**-2
-			self.kappa = 3.908*10**-4
-			self.mu = self.tau + self.mu_c + self.kappa 
-		if E == 6:
-			self.tau = 2.483*10**-7
-			self.mu_c = 2.455*10**-2
-			self.kappa = 3.155*10**-3
-			self.mu = self.tau + self.mu_c + self.kappa 
-		if E == 10:
-			self.tau = 1.386*10**-7
-			self.mu_c = 1.710*10**-2
-			self.kappa = 5.090*10**-3
-			self.mu = self.tau + self.mu_c + self.kappa 
+		self.mu = mu
+		self.mu_c = mu_c
+		self.tau = tau
+		self.kappa = kappa
 		
 		self.stepSize = stepSize
 		self.pos = pos	
@@ -399,34 +453,64 @@ class Electron:
 			self.pos = self.pos + self.stepSize*self.direction
 			#Now need to deposit deltaE into the current corresponding phantom voxel. 
 			#Find correct indices for phantom location to deposit dose.
-			phantom.addDose(self.pos,deltaE)
+			kernelPhantom.addDose(self.pos,deltaE)
 			
 		
 			
 		
 class Phantom:
 	
-	def __init__(self,phantomDim,xyVox,zVox):#the interaction point is in the middle of the phantom.
+	def __init__(self,phantomDim,phantomDimZ,xyVox,zVox):#the interaction point is in the middle of the phantom.
 		self.xyVox = xyVox
 		self.zVox = zVox
 		self.phantomDim = phantomDim
-		self.doses = np.zeros((math.floor(phantomDim/xyVox)+1,math.floor(phantomDim/xyVox)+1,math.floor(phantomDim/zVox)+1))
-		self.xPhant = np.linspace(-self.phantomDim/2,self.phantomDim/2,math.floor(self.phantomDim/self.xyVox)+1)
-		self.yPhant = np.linspace(-self.phantomDim/2,self.phantomDim/2,math.floor(self.phantomDim/self.xyVox)+1)	#Will compare the x,y,z, values of the electron to the closest in 
-		self.zPhant = np.linspace(-self.phantomDim/2,self.phantomDim/2,math.floor(self.phantomDim/self.zVox)+1) 
+		self.phantomDimZ = phantomDimZ
+		self.doses = np.zeros((math.floor(phantomDim/xyVox),math.floor(phantomDim/xyVox),math.floor(phantomDimZ/zVox)))
+		self.startingPoints = np.zeros((math.floor(phantomDim/xyVox),math.floor(phantomDim/xyVox),math.floor(phantomDimZ/zVox)))
+		self.xPhant = np.linspace(-self.phantomDim/2,self.phantomDim/2,math.floor(self.phantomDim/self.xyVox))
+		self.yPhant = np.linspace(-self.phantomDim/2,self.phantomDim/2,math.floor(self.phantomDim/self.xyVox))	#Will compare the x,y,z, values of the electron to the closest in 
+		self.zPhant = np.linspace(-self.phantomDimZ/4,3*self.phantomDimZ/4,math.floor(self.phantomDimZ/self.zVox)) 
 		#establish the x,y,z ranges for the phantom voxels.
+
 
 
 	
 	def addDose(self,pos,E):
 			#the above lists to determine which voxel to deposit energy to.
-	
-	
+		
 		#Need to convert positions to indices in phantom.
 		i = closestIndex(self.xPhant,pos[0])
 		j = closestIndex(self.yPhant,pos[1])
 		k = closestIndex(self.zPhant,pos[2])
 		self.doses[i,j,k] += E
+		
+		
+class Kernel:
+	
+	def __init__(self,kernelDim,kernelDimZ,xyVox,zVox):#the interaction point is in the middle of the phantom.
+		self.xyVox = xyVox
+		self.zVox = zVox
+		self.kernelDim = kernelDim
+		self.kernelDimZ = kernelDimZ
+		self.doses = np.zeros((math.floor(kernelDim/xyVox),math.floor(kernelDim/xyVox),math.floor(kernelDimZ/zVox)))
+		self.startingPoints = np.zeros((math.floor(kernelDim/xyVox),math.floor(kernelDim/xyVox),math.floor(kernelDimZ/zVox)))
+		self.xPhant = np.linspace(-self.kernelDim/2,self.kernelDim/2,math.floor(self.kernelDim/self.xyVox))
+		self.yPhant = np.linspace(-self.kernelDim/2,self.kernelDim/2,math.floor(self.kernelDim/self.xyVox))	#Will compare the x,y,z, values of the electron to the closest in 
+		self.zPhant = np.linspace(-self.kernelDimZ/4,3*self.kernelDimZ/4,math.floor(self.kernelDimZ/self.zVox)) 
+		#establish the x,y,z ranges for the phantom voxels.
+
+
+
+	
+	def addDose(self,pos,E):
+			#the above lists to determine which voxel to deposit energy to.
+		
+		#Need to convert positions to indices in phantom.
+		i = closestIndex(self.xPhant,pos[0])
+		j = closestIndex(self.yPhant,pos[1])
+		k = closestIndex(self.zPhant,pos[2])
+		self.doses[i,j,k] += E
+				
 		
 		
 if __name__ == "__main__":
