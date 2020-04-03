@@ -14,35 +14,42 @@ import scipy.optimize
 import seaborn as sb
 from matplotlib import cm 
 from scipy.ndimage import convolve
-
+import scipy.signal as fft
 #Variables:
 ######################################################################################
-E = 10#starting electron energy in Mev
-stepSize = 0.01 #step size in cm
-N = 100 #number of photon starting points
+E = 2#starting electron energy in Mev
+stepSize = 0.004 #step size in cm
+N = 10**7 #number of photon starting points
 comptonAngles = []#to hold all compton angles scattered, for plotting	
 comptonCount = 0	
-phantomDim = 15 #define the phantom cm dimensions (square)
-phantomDimZ = 150
+phantomDim = 14 #define the phantom cm dimensions (square)
+phantomDimZ = 40
 field_size = 10 #photon beam size
 xyVox = 0.05 #x,y direction voxel size in cm
 zVox = 0.05 #z (beam direction) voxel size in cm
 
+#Define the attenuation coefficients
 if E == 2:
 	tau = 1.063*10**-6
 	mu_c = 4.901*10**-2
 	kappa = 3.908*10**-4
-	mu = tau + mu_c + kappa 
+	mu = tau + mu_c + kappa
+	mu_en = 0.0260
+	mu_tr = 0.0262
 if E == 6:
 	tau = 2.483*10**-7
 	mu_c = 2.455*10**-2
 	kappa = 3.155*10**-3
-	mu = tau + mu_c + kappa 
+	mu = tau + mu_c + kappa
+	mu_en = 0.0180
+	mu_tr = 0.0185
 if E == 10:
 	tau = 1.386*10**-7
 	mu_c = 1.710*10**-2
 	kappa = 5.090*10**-3
-	mu = tau + mu_c + kappa 
+	mu = tau + mu_c + kappa
+	mu_en = 0.0157
+	mu_tr = 0.0162
 ##############################################################################
 
 def main():
@@ -61,41 +68,157 @@ def main():
 	global E
 	global interaction 
 	count = 0
-	SP = CSV2Array('stoppingPower.csv') #get list of energies and their corresponding 
-									#stopping powers in a 2d array. (first column = energy)
-
-	phantom = PhotonBeamSim() #returns a 3D phantom containing the correct # of interactions per position as elements
-	kernelPhantom = Kernel(5,10,xyVox,zVox)
-
-
-		
-	for i in range(N): #Get the kernel
-		global photon
-		pos = np.array([0,0,0])
-		photon = Photon(pos,[0,0,1],E,stepSize)
-		photon.interact()
-		count +=1
-		if count/N*100 % 1 == 0:
-			print("Simulating: ",int(100*count/N),"%")
-	#Save the Kernel:
-	kernel_name = str(E) + "MeV_Kernel"
-	np.save(kernel_name,kernelPhantom)		
-	convolve(phantom.startingPoints,kernelPhantom.doses)		
-	ContourPlot()
-	#HeatMap()		
+	# get list of energies and their corresponding stopping powers
+	SP = CSV2Array('stoppingPower.csv')
+	print('Getting the Terma Matrix...')
+	phantom = PhotonBeamSim() #returns  3D phantom containing the correct # of interactions per elem
+	terma = phantom.startingPoints * mu_en * E * 1.602 * 10 ** -13 / xyVox ** 2 * 1000  # Convert it to terma, 1000 is g to kg.
+	print('Getting the Kernel...')
+	GetKernel(30000,E,stepSize,count,True)   #Get the Kernel. True if loading one.
+	total_dose = Convolution(terma,kernelPhantom.doses,True)
+	#TotalHeatMap("d",E,total_dose)#d for depth, t for transverse
+	#TotalContourPlot('d',E,total_dose)
+	#KernelContours()
+	#KernelHeatMap()
+	depth_dose_curve(total_dose)
 
 
-#Histogram stuff for angles
-#	print(np.sum(phantom.doses))
-#	plt.hist(comptonAngles,bins=100,range=(0,math.pi))
-#	plt.show()
-#	a = np.linspace(0,math.pi,1000)
-#	b = np.zeros(1000)
-#	for i in range(len(b)):
-#		b[i] = KleinNeshina(E,a[i])
-#	plt.plot(a,b)	
-#	
-		
+def depth_dose_curve(total_dose):
+	depth_dose = []
+	depth = np.arange(0, int(len(total_dose[0, 0, :])) - 145, 1)
+	for i in range(len(depth)):
+		depth_dose.append(np.average(total_dose[int(len(total_dose[:, 0, 0]) / 2 - 15):int(len(total_dose[:, 0, 0]) / 2 + 15),int(len(total_dose[:, 0, 0]) / 2 -15):int(len(total_dose[:, 0, 0]) / 2 + 15), i]))
+	plt.plot(depth, depth_dose)
+	x_axis_ticks = np.true_divide(depth,1/xyVox)
+	plt.xlabel = ['{:3.0f}'.format(x) for x in x_axis_ticks]
+	plt.show()
+
+def TotalContourPlot(type, E,total_dose):
+	if type == 'd':
+		lat = np.arange(int(2 / xyVox), int(len(total_dose[:, 0, 0]) - (6 / xyVox)), 1)
+		depth = np.arange(0, int(len(total_dose[0, 0, :])) - 145, 1)
+		l, d = np.meshgrid(lat, depth)
+		lat2 = (lat * 0.05)
+		depth2 = (depth * 0.05)
+		l2, d2 = np.meshgrid(lat2, depth2)
+		A1 = np.linspace((0), int(len(total_dose[:, 0, 0]) - (5.5 / xyVox)) * xyVox,
+						 (len(total_dose[:, 0, 0]) - int(6 / xyVox)))
+		A2 = np.linspace(0, int(len(total_dose[0, 0, :]) - 145) * xyVox, len(total_dose[0, 0, :]) - 145)
+		for i in range(len(total_dose[0,0,:])):
+			depth_dose = total_dose[int(len(total_dose[:,0,0])/2),l,d]
+		#depth_dose = total_dose[int(len(total_dose[:, 0, 0]) / 2), l, d]
+		xlabels = ['{:3.0f}'.format(x) for x in A1]
+		ylabels = ['{:3.0f}'.format(y) for y in A2]
+		ax = plt.contourf(l,d,depth_dose,15)
+		plt.xlabel('x-axis (cm)')
+		plt.ylabel('depth (cm)')
+		plt.show()
+
+def TotalHeatMap(type,E,total_dose):
+
+	if type == 'd':# depth heat map
+		lat = np.arange(int(2/xyVox),int(len(total_dose[:,0,0])-(6/xyVox)),1)
+		depth = np.arange(0,int(len(total_dose[0,0,:]))-145,1)
+		l,d = np.meshgrid(lat,depth)
+		lat2 = (lat*0.05)
+		depth2 = (depth*0.05)
+		l2,d2 = np.meshgrid(lat2,depth2)
+		A1 = np.linspace((0), int(len(total_dose[:, 0, 0])-(5.5/xyVox)) * xyVox, (len(total_dose[:, 0, 0])-int(6/xyVox)))
+		A2 = np.linspace(0, int(len(total_dose[0, 0, :])-145) * xyVox, len(total_dose[0, 0, :])-145)
+		depth_dose = []
+		for i in range(len(depth)):
+			depth_dose.append(np.mean(total_dose[int(len(total_dose[:,0,0])/2-5):int(len(total_dose[:,0,0])/2+5),lat[i],depth[i]]))
+		#depth_dose = total_dose[int(len(total_dose[:,0,0])/2),l,d]
+		xlabels = ['{:3.0f}'.format(x) for x in A1]
+		ylabels = ['{:3.0f}'.format(y) for y in A2]
+		ax = sb.heatmap(depth_dose, xticklabels=xlabels, yticklabels=ylabels)
+		ax.set_xticks(ax.get_xticks()[::20])
+		ax.set_xticklabels(xlabels[::20])
+		ax.set_yticks(ax.get_yticks()[::30])
+		ax.set_yticklabels(ylabels[::30])
+		plt.xlabel('x-axis (cm)')
+		plt.ylabel('depth (cm)')
+
+		plt.show()
+	elif type == 't':	#transverse heat map
+		lat1 = np.arange(int(2.5/xyVox), int(len(total_dose[:, 0, 0])-6.5/xyVox), 1)
+		lat2 = np.arange(int(2.5/xyVox), int(len(total_dose[:, 0, 0])-6.5/xyVox), 1)
+		l1, l2 = np.meshgrid(lat1, lat2)
+		if E == 2:
+			depth_index = int(0.5/ xyVox)+30
+		if E == 6:
+			depth_index = int(1.5 / xyVox)+30
+		if E == 10:
+			depth_index = int(2.4 / xyVox)+30
+		#Get proper axis distance values:
+		A1 = np.linspace((0), int(len(total_dose[:, 0, 0])-(5.5/xyVox)) * xyVox, (len(total_dose[:, 0, 0])-int(5.5/xyVox)))
+		A2 = np.linspace((0), int(len(total_dose[:, 0, 0])-(5.5/xyVox)) * xyVox, (len(total_dose[:, 0, 0])-int(5.5/xyVox)))
+		for i in range(len(lat1)):
+			axial_dose[i] = total_dose[l1, l2, (depth_index-5):(depth_index+5)]
+
+		xlabels = ['{:3.1f}'.format(x) for x in A1]
+		ylabels = ['{:3.1f}'.format(y) for y in A2]
+		ax = sb.heatmap(axial_dose,xticklabels=xlabels, yticklabels=ylabels)
+		ax.set_xticks(ax.get_xticks()[::20])
+		ax.set_xticklabels(xlabels[::20])
+		ax.set_yticks(ax.get_yticks()[::20])
+		ax.set_yticklabels(ylabels[::20])
+		plt.xlabel('x-axis (cm)')
+		plt.ylabel('y-axis (cm)')
+		plt.show()
+
+	print('Image Generated!')
+
+def Convolution(terma,kern,load):
+	if load == True:
+		print('Getting the Convolution matrix')
+
+		conv = np.load(str(E) + "MeV_total_dose.npy")
+	else:
+
+		print('Convoluting!')
+		# add some padding to the terma and kernel:
+		terma_padded = np.lib.pad(terma, ((60, 60), (60, 60), (60, 60)))
+		kernel = np.lib.pad(kern, ((20, 20), (20, 20), (20, 20)))
+		conv = fft.fftconvolve(terma_padded,kernel,mode='same')
+		total_dose_file = str(E) + "MeV_total_dose"
+		np.save(total_dose_file, conv)
+	return conv
+def Histogram(array,bins):
+	plt.hist(array,bins,(0,4))
+	plt.show()
+
+def GetKernel(N,E,stepSize,count,load):
+	global kernelPhantom
+	global photon
+	if load == True:
+		kernelPhantom = Kernel(4, 10, xyVox, zVox)
+		kernel_name = str(E) + "MeV_Kernel_" + str(N) + ".npy"
+		kernelPhantom.doses = np.load(kernel_name, allow_pickle=True)  # Kernel(8,10,xyVox,zVox)
+	else:
+		kernelPhantom = Kernel(4, 10, xyVox, zVox)
+		photon = Photon(np.array([0,0,0]), np.array([0, 0, 1]), E, stepSize)
+		for i in range(N): #Get the kernel
+			photon.pos = np.array([0,0,0])
+			photon.direction = np.array([0,0,1])
+			photon.E = E
+			photon.interact()
+			count +=1
+			if count/N*100 % 1 == 0:
+				print("Simulating: ",int(100*count/N),"%")
+		kernelPhantom.doses = kernelPhantom.doses/(N*E) #normalize the kernel doses to the photon energy.
+
+		#Save the Kernel:
+		kernel_name = str(E) + "MeV_Kernel_" + str(N)
+		np.save(kernel_name,kernelPhantom.doses)
+
+def ArraySlice(type,array):
+	if type == depth:
+		cax_index = math.floor(len(array[:,0,0])/2)
+		return array[cax_index,:,:]
+	if type == transverse:
+		cax_index = math.floor(len(array[0,0,:])/2)
+		return array[:,:,cax_index]
 
 ####################################Compton Angle Functions ##################################################################################
 def PhotonBeamSim():
@@ -105,14 +228,20 @@ def PhotonBeamSim():
 	global E
 	global N
 	global field_size
-	interactions = VoxelInteractions(xyVox,field_size)#3D array where elements are integers indicating the 
-											#number of interactions at that position.
-	#Now need to combine this with a full phantom.
-	phantom = Phantom(phantomDim,phantomDimZ,xyVox,zVox)
-	off_beam_voxels = int((phantomDim-field_size)/2*xyVox) #number of voxels that will be skipped before adding in the 
-														 #interactions to the phantom array.
-	phantom.startingPoints[(off_beam_voxels+1):(200+off_beam_voxels+1),(off_beam_voxels+1):(200+off_beam_voxels+1),:] = interactions													 
-	#starting points contains the number of interactions in each voxel for the phantom!
+
+	phantom = Phantom(phantomDim, phantomDimZ, xyVox, zVox)
+	try:
+		phantom.startingPoints = np.load('raw_terma.npy',allow_pickle=True)
+	except:
+		interaction = VoxelInteractions(xyVox,field_size)#3D array where elements are integers indicating the
+												#number of interactions at that position.
+		#Now need to combine this with a full phantom.
+
+		off_beam_voxels = int((phantomDim-field_size)/2*xyVox) #number of voxels that will be skipped before adding in the
+															 #interactions to the phantom array.
+		phantom.startingPoints[(off_beam_voxels+1):(int(field_size/xyVox) +off_beam_voxels+1),(off_beam_voxels+1):(int(field_size/xyVox)+off_beam_voxels+1),:] = interaction
+		#starting points contains the number of interactions in each voxel for the phantom!
+		np.save('raw_terma',phantom.startingPoints)
 	return phantom
 
 def KleinNeshina(E,phi):
@@ -148,19 +277,8 @@ def ComptonScatter(E,pos):
 	direction = [math.sin(theta)*math.cos(phi),math.sin(theta)*math.sin(phi),math.cos(theta)]
 	e = Electron(pos,direction,E_elec,stepSize)
 	e.transport()
-		
-#############################################################################################################		
 
-######################photoelectric functions#####################################################################
-			
-		
-		#photoelectric is simply approximated, so no function is necessary.
-		
-		
-		
-########################################################################################################		
-			
-		########################Pair Production########################################################################
+###############################      Pair Production      ########################################################################
 		
 def PPEnergy(E): #returns the sampled positron and electron energies from the interaction.
 	reject = True
@@ -186,7 +304,6 @@ def PPAngles(Epos,Eneg): #returns the positron and electron azimuthal scattering
 		
 	return [thetaPos,thetaElec]
 		
-		
 def PairProduction(E,pos):
 
 	#first of all get the phi scattering angle for each..
@@ -203,10 +320,7 @@ def PairProduction(E,pos):
 	p = Electron(pos,dirPos,Epos,stepSize)	#create positron object
 	e.transport()
 	p.transport()#transporting the patticles.
-		
-		
-		
-		
+
 	####################################################################################################################	
 def CSV2Array(fileName): #This function opens the CSV with stopping powers and loads energies and SPs into a 2 column array, 
 	f = open(fileName,'r')#... and sets up an interpolate function.
@@ -229,13 +343,11 @@ def CSV2Array(fileName): #This function opens the CSV with stopping powers and l
 	SP = scipy.interpolate.interp1d(SP[:,0],SP[:,1])
 	
 	return SP
-
 	
 def closestIndex(value,list):	#find the index in list of the entry closest to value.
 	difs = abs(list-value)	#difference between list and value
 	index = np.argmin(difs) #minimum gives the closest match
 	return index
-
 
 def phiScatterAngle(): #Sample the scatter angle for each step
 	return random.random()*2*math.pi
@@ -269,16 +381,24 @@ def plotCAXDose():
 	plt.xlabel('Depth (cm)')
 	plt.ylabel('Depth Dose')
 
-def HeatMap():
+def InteractionsHeatMap(interactions):
+	lat = np.arange(0,int(len(interactions[:,0,0])),1)
+	depth = np.arange(0,int(len(interactions[0,0,:])),1)
+	l,d = np.meshgrid(lat,depth)
+	ints = interactions[20,l,d]
+	sb.heatmap(ints)
+	plt.show()
+
+def KernelHeatMap():
 #	CAXIndice = math.floor(phantom.phantomDim/phantom.xyVox/2+1) #get indices of the central axis z,y with respect to phantom.
 #	sb.heatmap((phantom.doses[CAXIndice,(CAXIndice-20):(CAXIndice+20),(CAXIndice-30):(CAXIndice+40)]))
 	global phantomDim
 	global xyVox
-	CAXIndex = math.floor(kernelPhantom.phantomDim/kernelPhantom.xyVox/2) #get indices of the central axis z,y with respect to phantom.
-	CAXIndexDepth = math.floor(kernelPhantom.phantomDimZ/kernelPhantom.xyVox/2)
+	CAXIndex = math.floor(kernelPhantom.kernelDim/kernelPhantom.xyVox/2) #get indices of the central axis z,y with respect to phantom.
+	CAXIndexDepth = math.floor(kernelPhantom.kernelDimZ/kernelPhantom.xyVox/4)
 	
 	lat = np.arange((CAXIndex-10),(CAXIndex+10),1)
-	depth = np.arange((CAXIndexDepth-10),(CAXIndexDepth+20),1)
+	depth = np.arange((CAXIndexDepth-5),(CAXIndexDepth+15),1)
 	l,d = np.meshgrid(lat,depth)
 	#l,d are in terms of index right now, so need to scale them to appropriate units.
 	lat2 = []
@@ -292,42 +412,66 @@ def HeatMap():
 
 	doses = kernelPhantom.doses[CAXIndex,l,d]#phantom.doses[CAXIndex,(CAXIndex-20):(CAXIndex+20),(CAXIndex-30):(CAXIndex+40)]
 
-	plot = sb.heatmap(doses)
+	sb.heatmap(doses)
+	plt.show()
 #	plot.set(xticklabels=lat3)
 #	plot.set(yticklabels = depth3)
-
 	
-	
-def ContourPlot():
+def KernelContours():
 	global phantomDim
 	global xyVox
 	CAXIndex = math.floor(kernelPhantom.kernelDim/kernelPhantom.xyVox/2) #get indices of the central axis z,y with respect to phantom.
-	CAXIndexDepth = math.floor(kernelPhantom.kernelDimZ/kernelPhantom.xyVox/4)
-	
-	lat = np.arange((CAXIndex-10),(CAXIndex+10),1)
-	depth = np.arange((CAXIndexDepth-10),(CAXIndexDepth+20),1)
+	CAXIndexDepth = math.floor(kernelPhantom.kernelDimZ/kernelPhantom.xyVox/2)
+
+	if E == 2:
+		lat = np.arange((CAXIndex - 15), (CAXIndex + 15), 1)
+		depth = np.arange((CAXIndexDepth - 5), (CAXIndexDepth + 20), 1)
+	elif E == 6:
+		lat = np.arange((CAXIndex - 25), (CAXIndex + 25), 1)
+		depth = np.arange((CAXIndexDepth - 5), (CAXIndexDepth + 50), 1)
+	elif E == 10:
+		lat = np.arange((CAXIndex-35),(CAXIndex+35),1)
+		depth = np.arange((CAXIndexDepth-5),(CAXIndexDepth+85),1)
 	l,d = np.meshgrid(lat,depth)
 	#l,d are in terms of index right now, so need to scale them to appropriate units.
-	lat2 = []
+	x_tick_index = []
+	x_tick_dist = []
+	y_tick_index = []
+	y_tick_dist = []
+
 	depth2 = []
 	for i in range(len(lat)):
-		lat2.append(xyVox*(lat[i]-200))#-phantomDim/(xyVox*2)+lat[i]*xyVox		
+		if i % 10 == 0:
+			x_tick_index.append(lat[i])
+			x_tick_dist.append('{0:.3g}'.format(lat[i]*xyVox))
 	for i in range(len(depth)):
-		depth2.append((depth[i]-200)*xyVox)
+		if i % 10 == 0:
+			y_tick_index.append(depth[i])
+			y_tick_dist.append('{0:.3g}'.format((depth[i])*xyVox))
 
 
-	l2,d2 = np.meshgrid(lat2,depth2)
+	doses = (kernelPhantom.doses[l,CAXIndex,d]) #phantom.doses[CAXIndex,(CAXIndex-20):(CAXIndex+20),(CAXIndex-30):(CAXIndex+40)]
+	for i in range(len(doses[:,0])):
+		for j in range(len(doses[0,:])):
+			if doses[i,j] != 0:
+				doses[i,j] = np.log(doses[i,j])
+			else:
+				doses[i,j] = -math.inf
 
-	doses = kernelPhantom.doses[CAXIndex,l,d]#phantom.doses[CAXIndex,(CAXIndex-20):(CAXIndex+20),(CAXIndex-30):(CAXIndex+40)]
-
-
-	plt.contourf(l,d,doses,15)
+	plt.contourf(l,d,doses,20)
+	plt.xticks(x_tick_index,x_tick_dist)
+	plt.yticks(y_tick_index, y_tick_dist)
+	plt.ticklabel_format()
 	plt.colorbar()	
 	plt.title('Contour Plot')
 	plt.xlabel('Off-axis Distance (mm)')
-	plt.ylabel('Depth (mm)')
-	
-	
+	plt.ylabel('Depth (cm)')
+	plt.show()
+	# save_boolean = input("Would you like to save this figure? (y/n)")
+	# if save_boolean == 'y':
+	# 	file_name = "KernelFigs/" +str(E)+"MeV_Kernel_Figure"
+	# 	plt.savefig(file_name)
+
 def VoxelInteractions(xyVox,fieldSize):
 	global mu
 	global E
@@ -338,32 +482,28 @@ def VoxelInteractions(xyVox,fieldSize):
 	#first get number of interactions per depth column:
 	voxels_per_row = int(fieldSize/xyVox)
 	col_ints = N/(voxels_per_row)**2
-	#idea will be to sample 10000 photon interactions in one column, and then normalize this to col_ints, and assign
-	#the amount of interactions to each voxel.	
-	interactions = np.zeros((voxels_per_row,voxels_per_row,int(phantomDimZ/xyVox)))
-	sampleInts = np.zeros((int(phantomDim/xyVox)))
-		
-	#now assign each column in the interactions matrix these values, but scaled to the correct amount of photons.
-	#first scale it:
-	sampleInts = sampleInts*(col_ints)/(10000)
-	
-	for i in range(len(interactions[:,1,1])):
-		for j in range(len(interactions[:,1,1])):#Scanning across all vertical columns in the field
+	interaction = np.zeros((voxels_per_row,voxels_per_row,int(phantomDimZ/xyVox)))
+
+	for i in range(len(interaction[:,1,1])):
+		for j in range(len(interaction[:,1,1])):#Scanning across all vertical columns in the field
 				for d in range(int(col_ints)):
 					#recall that the distance into the phantom (0 at surface) is 0.05cm*Index.
 					R = random.random()
 					d = -math.log(R)/mu
 					#Now need to convert this into the appropriate depth index.
 					index = int(d/xyVox)
-					
-					try:
-						interactions[i,j,index]=interactions[i,j,index]+1
-					except:
-						pass
-	return interactions	
-		
-	
-	
+					max_index = phantomDimZ/xyVox - 3/xyVox
+					if (index < max_index):
+						try:
+							interaction[i,j,index]=interaction[i,j,index]+1
+						except:
+							pass
+	#InteractionsHeatMap(interaction)
+	lat = np.arange(0,int(len(interaction[:,0,0])),1)
+	depth = np.arange(0,int(len(interaction[0,0,:])),1)
+	l,d = np.meshgrid(lat,depth)
+	ints = interaction[20,l,d]
+	return interaction
 
 class Photon:
 	
@@ -399,9 +539,6 @@ class Photon:
 
 		elif (self.kappa/self.mu < R <1): #compton scatter.
 			ComptonScatter(self.E,self.pos)
-			
-		
-	
 class Electron:
 	
 	def __init__(self,pos,direction, E,stepSize):
@@ -421,7 +558,7 @@ class Electron:
 			if (self.direction[0] == 0):
 				self.phi = 0
 			else:	
-				self.phi = math.atan(self.direction[1]/self.direction[0])
+				self.phi = np.arctan2(self.direction[1],self.direction[0])
 				
 			self.theta = math.acos(self.direction[2])	
 			deltaE = self.stepSize*SP(self.E) #find the energy lost in the step (CSDA)
@@ -454,10 +591,7 @@ class Electron:
 			#Now need to deposit deltaE into the current corresponding phantom voxel. 
 			#Find correct indices for phantom location to deposit dose.
 			kernelPhantom.addDose(self.pos,deltaE)
-			
-		
-			
-		
+
 class Phantom:
 	
 	def __init__(self,phantomDim,phantomDimZ,xyVox,zVox):#the interaction point is in the middle of the phantom.
@@ -465,16 +599,13 @@ class Phantom:
 		self.zVox = zVox
 		self.phantomDim = phantomDim
 		self.phantomDimZ = phantomDimZ
-		self.doses = np.zeros((math.floor(phantomDim/xyVox),math.floor(phantomDim/xyVox),math.floor(phantomDimZ/zVox)))
+		#self.doses = np.zeros((math.floor(phantomDim/xyVox),math.floor(phantomDim/xyVox),math.floor(phantomDimZ/zVox)))
 		self.startingPoints = np.zeros((math.floor(phantomDim/xyVox),math.floor(phantomDim/xyVox),math.floor(phantomDimZ/zVox)))
 		self.xPhant = np.linspace(-self.phantomDim/2,self.phantomDim/2,math.floor(self.phantomDim/self.xyVox))
 		self.yPhant = np.linspace(-self.phantomDim/2,self.phantomDim/2,math.floor(self.phantomDim/self.xyVox))	#Will compare the x,y,z, values of the electron to the closest in 
-		self.zPhant = np.linspace(-self.phantomDimZ/4,3*self.phantomDimZ/4,math.floor(self.phantomDimZ/self.zVox)) 
+		self.zPhant = np.linspace(0,phantomDimZ,math.floor(self.phantomDimZ/self.zVox))
 		#establish the x,y,z ranges for the phantom voxels.
 
-
-
-	
 	def addDose(self,pos,E):
 			#the above lists to determine which voxel to deposit energy to.
 		
@@ -483,8 +614,7 @@ class Phantom:
 		j = closestIndex(self.yPhant,pos[1])
 		k = closestIndex(self.zPhant,pos[2])
 		self.doses[i,j,k] += E
-		
-		
+
 class Kernel:
 	
 	def __init__(self,kernelDim,kernelDimZ,xyVox,zVox):#the interaction point is in the middle of the phantom.
@@ -493,10 +623,10 @@ class Kernel:
 		self.kernelDim = kernelDim
 		self.kernelDimZ = kernelDimZ
 		self.doses = np.zeros((math.floor(kernelDim/xyVox),math.floor(kernelDim/xyVox),math.floor(kernelDimZ/zVox)))
-		self.startingPoints = np.zeros((math.floor(kernelDim/xyVox),math.floor(kernelDim/xyVox),math.floor(kernelDimZ/zVox)))
+		#self.startingPoints = np.zeros((math.floor(kernelDim/xyVox),math.floor(kernelDim/xyVox),math.floor(kernelDimZ/zVox)))
 		self.xPhant = np.linspace(-self.kernelDim/2,self.kernelDim/2,math.floor(self.kernelDim/self.xyVox))
-		self.yPhant = np.linspace(-self.kernelDim/2,self.kernelDim/2,math.floor(self.kernelDim/self.xyVox))	#Will compare the x,y,z, values of the electron to the closest in 
-		self.zPhant = np.linspace(-self.kernelDimZ/4,3*self.kernelDimZ/4,math.floor(self.kernelDimZ/self.zVox)) 
+		self.yPhant = np.linspace(-self.kernelDim/2,self.kernelDim/2,math.floor(self.kernelDim/self.xyVox))
+		self.zPhant = np.linspace(-self.kernelDimZ/2,self.kernelDimZ/2,math.floor(self.kernelDimZ/self.zVox))
 		#establish the x,y,z ranges for the phantom voxels.
 
 
