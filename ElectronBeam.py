@@ -20,10 +20,10 @@ def main():
 	global SP
 	global e
 	particleEnergy = 10 #starting electron energy in Mev
-	stepSize = 0.001 #step size in cm
+	stepSize = 0.002 #step size in cm
 	xyVox = 0.5 #x,y direction voxel size in cm
 	zVox = 0.2 #z (beam direction) voxel size in cm
-	N = 2000 #number of primary particles
+	N = 5000 #number of primary particles
 	phantomDim = 20 #define the phantom cm dimensions (square)
 	phantom = Phantom(phantomDim,xyVox,zVox)
 	phantom.doses = np.load('electronDose_final3.npy')
@@ -200,7 +200,8 @@ class Electron:
 			#Now need to deposit deltaE into the current corresponding phantom voxel. 
 			#Find correct indices for phantom location to deposit dose.
 			phantom.addDose(self.pos,deltaE)
-			
+		if self.E > 0:
+			phantom.addDose(self.pos,self.E)
 class Phantom:
 	
 	def __init__(self,phantomDim,xyVox,zVox):
