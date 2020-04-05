@@ -70,79 +70,82 @@ def main():
 	SP = CSV2Array('stoppingPower.csv','e')
 	SP_pos = CSV2Array('stopping_power_pos.xlsx','p')
 	print('Getting the Terma Matrix...')
-	phantom = PhotonBeamSim() #returns  3D phantom containing the correct # of interactions per elem
+	phantom = PhotonBeamSim(False) #returns  3D phantom containing the correct # of interactions per elem
 	terma = phantom.startingPoints * mu_en * E * 1.602 * 10 ** -13 / xyVox ** 2 * 1000  # Convert it to terma, 1000 is g to kg.
-	# for i in range(len(terma[:,0,0])):
-	# 	for j in range(len(terma[0,:,0])):
-	# 		terma[i,j,0] = 1000
-	np.save('terma_start',terma)
 	print('Getting the Kernel...')
-	GetKernel(1000000,E,stepSize,count,True)   #Get the Kernel. True if loading one.
+	GetKernel(1000000,E,stepSize,count,False)   #Get the Kernel. True if loading one.
 	total_dose = Convolution(terma,kernelPhantom.doses,False)
-	print(np.amax(total_dose))
-	#TotalHeatMap("d",E,total_dose)#d for depth, t for transverse
+
 	#TotalContourPlot('d',E,total_dose)
-	KernelContours()
+	#KernelContours()
 	#KernelHeatMap()
-	dose_curve(total_dose,'transverse')
-	dose_curve(total_dose, 'depth')
+	dose_curve(total_dose,'depth')
+	#dose_curve(total_dose, 'depth')
 	#compton_plot(E)
 
 
 
 def dose_curve(total_dose,type):
-	if type == 'depth':
-		depth_dose = []
-		depth = np.arange(0, int(len(total_dose[0, 0, :])) - 200, 1)
-		for i in range(len(depth)):
-			depth_dose.append(np.average(total_dose[int(len(total_dose[:, 0, 0]) / 2 - 15):int(len(total_dose[:, 0, 0]) / 2 + 15),int(len(total_dose[:, 0, 0]) / 2 -15):int(len(total_dose[:, 0, 0]) / 2 + 15), 60+i]))
-		depth_dose = depth_dose/np.amax(depth_dose)
-
-		plt.plot(depth, depth_dose)
-
-		print("The maximum depth is at "+ str(np.argmax(depth_dose)*xyVox) + " cm")
-		print("The initial PDD is " + str('{0:.2g}'.format(depth_dose[0])))
-		x_axis_ticks = np.true_divide(depth,1/xyVox)
+	
+	if type == 'depth': #for a sagittal profile (from the side, PDD)
+		depth = np.arange(0, int(len(total_dose[0, 0, :])) - 200, 1) #initiate the range of depth values
+		depth_dose = np.zeros(len(depth))#will hold the PDD dose for each depth 
+		
+		for i in range(len(depth_dose)):#Loop to get PDD for each depth. 
+			#the plot is noisy, so I average over the 30 voxels in each of the transverse directions for each depth
+			depth_dose[i] = (np.average(total_dose[int(len(total_dose[:, 0, 0]) / 2 - 15):int(len(total_dose[:, 0, 0]) / 2 + 15),int(len(total_dose[:, 0, 0]) / 2 -15):int(len(total_dose[:, 0, 0]) / 2 + 15), 60+i]))
+		
+		depth_dose = depth_dose/np.amax(depth_dose)#normalize the doses
+		cax = plt.plot(depth, depth_dose,'r')	
+		print("The maximum depth is at "+ str(np.argmax(depth_dose)*xyVox) + " cm")#console output 
+		print("The initial PDD is " + str('{0:.2g}'.format(depth_dose[0])))#console output
+		x_axis_ticks = np.true_divide(depth,1/xyVox) #Gets the depth ticks in terms of centimeters, not indices
 		plt.xlim((0,700))
 		plt.ylim((0,1))
-		plt.xlabel = ['{:3.0f}'.format(x) for x in x_axis_ticks]
+
+		plt.xlabel = ['{:3.0f}'.format(x) for x in x_axis_ticks]#format decimals
+			
+		#I dont want a tick for every voxel, so I create a loop to make one every 2 cm.
 		x_tick_index = []
 		x_tick_dist = []
-
 		depth2 = []
-		for i in range(len(depth)):
-			if i % 40 == 0:
+		for i in range(len(depth)):#Loop to get the correct tick labels
+			if i % 40 == 0:#every 2 cm
 				x_tick_index.append(depth[i])
 				x_tick_dist.append('{0:.3g}'.format(depth[i] * xyVox))
 		plt.xticks(x_tick_index, x_tick_dist)
-		plt.tick_params(top=True)
-		#plt.xlabel('Depth (cm)')
-		#plt.ylabel('Depth Dose')
-		plt.show()
+
+	# to do a transverse plane plot:	
 	if type == 'transverse':
-		transverse_dose = []
-		transverse_axis = np.arange(0, int(len(total_dose[0, :, 0])), 1)
-		for i in range(len(transverse_axis)):
-			transverse_dose.append(np.average(total_dose[int(len(total_dose[:, 0, 0]) / 2 - 40):int(len(total_dose[:, 0, 0]) / 2 + 40),i, int(len(total_dose[0, 0, :]) / 2-15):int(len(total_dose[0, 0, :]) / 2)])+15)
-		plt.plot(transverse_axis, transverse_dose)
-		plt.xlabel('lateral distance (cm)')
-		plt.ylabel('Transverse relative Dose')
-		print(np.argmax(transverse_dose))
+
+		transverse_axis = np.arange(20, int(len(total_dose[0, :, 0])), 1)
+		transverse_dose = np.zeros(len(transverse_axis))	
+		for i in range(len(transverse_axis)-80):
+			transverse_dose[i] = np.average(total_dose[i, \
+				  int(len(total_dose[:, 0, 0]) / 2 - 80):\
+				  int(len(total_dose[:, 0, 0]) / 2 +80),int(len(total_dose[0, 0, :]) / 4)])
+  
+	
+	
+		transverse_d = transverse_dose / np.amax(transverse_dose)
+		print(np.amax(transverse_dose))
+		cax = plt.plot(transverse_axis, transverse_d,'r')
+		plt.ylim(0,1)
+		plt.xlim(-7,7)
 		x_axis_ticks = np.true_divide(transverse_axis,1/xyVox)
-		plt.xlim((0,220))
 		plt.xlabel = ['{:3.0f}'.format(x) for x in x_axis_ticks]
 		x_tick_index = []
 		x_tick_dist = []
-		y_tick_index = []
-		y_tick_dist = []
-		depth2 = []
 		for i in range(len(transverse_axis)):
-			if i % 40 == 0:
+			if i % 20 == 0:
 				x_tick_index.append(transverse_axis[i])
-				x_tick_dist.append('{0:.3g}'.format(transverse_axis[i] * xyVox-3))
+				x_tick_dist.append('{0:.3g}'.format(transverse_axis[i] * xyVox-9))
 		plt.xticks(x_tick_index, x_tick_dist)
-
-		plt.show()
+		
+		
+	plt.tick_params(top=True)
+	plt.show()	
+	
 def compton_plot(E):
 	#First get the analytical distribution:
 	phi = np.linspace(0,math.pi,100)#Get the range of angles for the analytical plot
@@ -160,8 +163,8 @@ def compton_plot(E):
 		monte_dist[index] += 1 #increment one interaction for said angle in the monte_dist
 	monte_dist = monte_dist/np.amax(monte_dist)
 
-	plt.plot(phi,analytic_dist)
-	plt.plot(phi,monte_dist)
+	plt.plot(phi,analytic_dist,label = 'Analytical Distribution')
+	plt.plot(phi,monte_dist,label = 'Monte Carlo generated distribution')
 	plt.xlim(0,3.1415)
 	plt.ylim(0,1)
 	plt.xlabel('Photon Scattering Angle, radians')
@@ -276,7 +279,8 @@ def GetKernel(N,E,stepSize,count,load):
 			photon.interact()
 			count +=1
 			if count/N*100 % 1 == 0:
-				print("Simulating: ",int(100*count/N),"%")
+				print("Simulating: ",int(100*count/N),"%")	
+		print(np.sum(kernelPhantom.doses))			
 		kernelPhantom.doses = kernelPhantom.doses/(N*E) #normalize the kernel doses to the photon energy.
 		#Save the Kernel:
 		kernel_name = str(E) + "MeV_Kerny_" + str(N)
@@ -298,9 +302,9 @@ def PhotonBeamSim():
 	global field_size
 
 	phantom = Phantom(phantomDim, phantomDimZ, xyVox, zVox)
-	try:
+	if load == True:
 		phantom.startingPoints = np.load('raw_terma.npy',allow_pickle=True)
-	except:
+	else:
 		interaction = VoxelInteractions(xyVox,field_size)#3D array where elements are integers indicating the
 												#number of interactions at that position.
 		#Now need to combine this with a full phantom.
@@ -489,13 +493,13 @@ def KernelContours():
 	CAXIndexDepth = math.floor(kernelPhantom.kernelDimZ/kernelPhantom.xyVox/2)
 
 	if E == 2:
-		lat = np.arange((CAXIndex - 15), (CAXIndex + 15), 1)
-		depth = np.arange((CAXIndexDepth - 7), (CAXIndexDepth + 16), 1)
+		lat = np.arange((CAXIndex - 20), (CAXIndex + 20), 1)
+		depth = np.arange((CAXIndexDepth - 6), (CAXIndexDepth + 16), 1)
 	elif E == 6:
-		lat = np.arange((CAXIndex - 25), (CAXIndex + 25), 1)
-		depth = np.arange((CAXIndexDepth - 5), (CAXIndexDepth + 50), 1)
+		lat = np.arange((CAXIndex - 40), (CAXIndex + 40), 1)
+		depth = np.arange((CAXIndexDepth - 6), (CAXIndexDepth + 55), 1)
 	elif E == 10:
-		lat = np.arange((CAXIndex-39),(CAXIndex+39),1)
+		lat = np.arange((CAXIndex-50),(CAXIndex+50),1)
 		depth = np.arange((CAXIndexDepth-5),(CAXIndexDepth+99),1)
 
 	l,d = np.meshgrid(lat,depth)
@@ -509,13 +513,13 @@ def KernelContours():
 	for i in range(len(lat)):
 		if i % 10 == 0:
 			x_tick_index.append(lat[i])
-			x_tick_dist.append('{0:.3g}'.format(lat[i]*xyVox))
+			x_tick_dist.append('{0:.3g}'.format(lat[i]*xyVox-3))
 	for i in range(len(depth)):
 		if i % 10 == 0:
 			y_tick_index.append(depth[i])
 			y_tick_dist.append('{0:.3g}'.format((depth[i])*xyVox))
 
-	doses = (kernelPhantom.doses[l,CAXIndex,d]) #phantom.doses[CAXIndex,(CAXIndex-20):(CAXIndex+20),(CAXIndex-30):(CAXIndex+40)]
+	doses = (kernelPhantom.doses[CAXIndex,l,d]) #phantom.doses[CAXIndex,(CAXIndex-20):(CAXIndex+20),(CAXIndex-30):(CAXIndex+40)]
 	doses /= np.amax(kernelPhantom.doses)
 	for i in range(len(doses[:,0])):
 		for j in range(len(doses[0,:])):
@@ -523,18 +527,19 @@ def KernelContours():
 				doses[i,j] = np.log10(doses[i,j])
 			else:
 				doses[i,j] = -math.inf
-	colour_range = np.linspace(-5,-1,5)
+	colour_range = np.linspace(-6,-0.1,10)
 	fig, ax = plt.subplots()
 	cax = plt.contourf(l,d,doses,colour_range)
 	tick_range = np.arange(-30,-6,2)
 	tick_labels = tick_range
 	cbar = fig.colorbar(cax)
+	cbar.set_label('Logarithm of normalized dose')
 	plt.xticks(x_tick_index,x_tick_dist)
 	plt.yticks(y_tick_index, y_tick_dist)
 	plt.ticklabel_format()
 	#plt.colorbar()
 
-	plt.title('Contour Plot')
+	plt.title(str(E) + 'MeV Kernel')
 	plt.xlabel('Off-axis Distance (cm)')
 	plt.ylabel('Depth (cm)')
 	plt.show()
@@ -557,7 +562,7 @@ def VoxelInteractions(xyVox,fieldSize):
 					R = random.random()
 					d = -math.log(R)/mu
 					#Now need to convert this into the appropriate depth index.
-					index = int(d/xyVox)
+					index = int((d+xyVox/2)/xyVox)
 					max_index = phantomDimZ/xyVox - 3/xyVox
 					if (index < max_index):
 						try:
@@ -606,12 +611,7 @@ class Electron:
 		self.direction = direction
 		self.E = E
 		self.stepSize = stepSize
-
-
 		#Now define directions in terms of spherical coordinates
-
-
-
 	def transport(self): #the method for taking a condensed history step
 		while self.E > 0.02:
 			if (self.direction[0] == 0):
@@ -700,7 +700,7 @@ class Phantom:
 		self.startingPoints = np.zeros((math.floor(phantomDim/xyVox),math.floor(phantomDim/xyVox),math.floor(phantomDimZ/zVox)))
 		self.xPhant = np.linspace(-self.phantomDim/2,self.phantomDim/2,math.floor(self.phantomDim/self.xyVox))
 		self.yPhant = np.linspace(-self.phantomDim/2,self.phantomDim/2,math.floor(self.phantomDim/self.xyVox))	#Will compare the x,y,z, values of the electron to the closest in 
-		self.zPhant = np.linspace(0,phantomDimZ,math.floor(self.phantomDimZ/self.zVox))
+		self.zPhant = np.linspace(self.xVox/2,phantomDimZ+self.zVox/2,math.floor(self.phantomDimZ/self.zVox))
 		#establish the x,y,z ranges for the phantom voxels.
 
 	def addDose(self,pos,E):
@@ -724,12 +724,8 @@ class Kernel:
 		np.linspace(self.zVox/2,self.kernelDim+self.zVox/2,math.floor(self.kernelDim/self.zVox))
 		#establish the x,y,z ranges for the phantom voxels.
 
-
-
-	
 	def addDose(self,pos,E):
-			#the above lists to determine which voxel to deposit energy to.
-		
+		#the above lists to determine which voxel to deposit energy to.		
 		#Need to convert positions to indices in phantom.
 		i = closestIndex(self.xPhant,pos[0])
 		j = closestIndex(self.yPhant,pos[1])
