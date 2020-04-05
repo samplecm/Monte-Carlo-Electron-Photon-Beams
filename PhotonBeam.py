@@ -18,7 +18,7 @@ import scipy.signal as fft #used for the convolution fast fourier transform
 import warnings #raises exceptions for warnings
 #Variables:
 ######################################################################################
-E = 10#starting electron energy in Mev
+E = 6#starting electron energy in Mev
 stepSize = 0.02 #step size in cm
 N = 10**7 #number of photon starting points
 phantomDim = 14 #define the phantom cm dimensions (square)
@@ -65,8 +65,8 @@ def main():
 	phantom = PhotonBeamSim(True) #returns phantom array containing the correct # of interactions in respective voxels, from the 10x10 photon beam
 	terma = phantom.startingPoints * mu_en * E * 1.602 * 10 ** -13 / xyVox ** 2 * 1000  # Convert the interactions in voxels to terma by converting to energy/mass
 	print('Getting the Kernel...')
-	GetKernel(1000,E,stepSize,count,False) #Get the primary dose Kernel. True if loading one.
-
+	GetKernel(1000000,E,stepSize,count,False) #Get the primary dose Kernel. True if loading one.
+	print(np.argmax(kernelPhantom.doses[60,60,:]))
 	# total_dose = Convolution(terma,kernelPhantom.doses,True)#Convolute the terma and the primary kernel to get the total dose
 
 	# energy_transferred(kernelPhantom.doses,E)#method for finding the energy transferred in a kernel (problem 2.4)
@@ -75,7 +75,7 @@ def main():
 	#KernelHeatMap()#method for creating a heat map of the kernel
 	# dose_curve(total_dose,'d')#method for getting the total dose PDD or transverse profile ('d' or 't')
 	#compton_plot(E)#method for comparing the compton angular distribution to the Monte Carlo angular distribution
-	#energy_transferred(kernelPhantom.doses,E)
+	energy_transferred(kernelPhantom.doses,E)
 def energy_transferred(kernel_doses,E):#method for determining the energy transferred in a given kernel.
 	global mu
 	global mu_tr
@@ -270,10 +270,9 @@ def GetKernel(N,E,stepSize,count,load):#Get the primary dose kernel
 			photon.pos = np.array([0,0,0])#photons all start at the point [0,0,0], which is in the phantom centre
 			photon.direction = np.array([0,0,1])#photons start facing straight down
 			photon.E = E#reset the photon energy
-
 			photon.interact()#photon interaction
-
 			count +=1
+
 			if count/N*100 % 1 == 0:#keep track of progress
 				print("Simulating: ",int(100*count/N),"%")
 
@@ -658,7 +657,7 @@ class Phantom: #Phantom for holding the terma
 		self.startingPoints = np.zeros((math.floor(phantomDim/xyVox),math.floor(phantomDim/xyVox),math.floor(phantomDimZ/zVox)))
 		self.xPhant = np.linspace(-self.phantomDim/2,self.phantomDim/2,math.floor(self.phantomDim/self.xyVox))
 		self.yPhant = np.linspace(-self.phantomDim/2,self.phantomDim/2,math.floor(self.phantomDim/self.xyVox))	#Will compare the x,y,z, values of the electron to the closest in 
-		self.zPhant = np.linspace(self.zVox/2,phantomDimZ+self.zVox/2,math.floor(self.phantomDimZ/self.zVox))
+		self.zPhant = np.linspace(self.zVox/2,self.phantomDimZ+self.zVox/2,math.floor(self.phantomDimZ/self.zVox))
 		#establish the x,y,z ranges for the phantom voxels.
 
 	def addDose(self,pos,E):
@@ -677,17 +676,17 @@ class Kernel: #Kernel Phantom for holding the kernel voxels
 		self.kernelDimZ = kernelDimZ
 		self.doses = np.zeros((math.floor(kernelDim/xyVox),math.floor(kernelDim/xyVox),math.floor(kernelDimZ/zVox)))
 		#self.startingPoints = np.zeros((math.floor(kernelDim/xyVox),math.floor(kernelDim/xyVox),math.floor(kernelDimZ/zVox)))
-		self.xPhant = np.linspace(-self.kernelDim/2,self.kernelDim/2,math.floor(self.kernelDim/self.xyVox))
-		self.yPhant = np.linspace(-self.kernelDim/2,self.kernelDim/2,math.floor(self.kernelDim/self.xyVox))
-		self.zPhant = np.linspace(self.zVox/2,self.kernelDim+self.zVox/2,math.floor(self.kernelDim/self.zVox))
+		self.xPhant = np.linspace(-self.kernelDim/2, self.kernelDim/2, math.floor(self.kernelDim/self.xyVox))
+		self.yPhant = np.linspace(-self.kernelDim/2, self.kernelDim/2, math.floor(self.kernelDim/self.xyVox))
+		self.zPhant = np.linspace(-self.kernelDimZ/2,self.kernelDimZ/2,math.floor(self.kernelDimZ/self.zVox))
+
 		#establish the x,y,z ranges for the phantom voxels.
 
 	def addDose(self,pos,E):
-		#the above lists to determine which voxel to deposit energy to.		
 		#Need to convert positions to indices in phantom.
-		i = closestIndex(self.xPhant,pos[0])
-		j = closestIndex(self.yPhant,pos[1])
-		k = closestIndex(self.zPhant,pos[2])
+		i = closestIndex(self.xPhant, pos[0])
+		j = closestIndex(self.yPhant, pos[1])
+		k = closestIndex(self.zPhant, pos[2])
 		self.doses[i,j,k] += E
 
 if __name__ == "__main__":
